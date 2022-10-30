@@ -1,0 +1,55 @@
+def hello(name):
+    print("Hello!")
+    print(name)
+    print("Welcome to Codeit")
+
+hello("Chris")
+
+
+###
+def print_sum(a,b,c):
+    print(a+b-c+(a+b+c))
+print_sum(7,3,10)
+
+
+###
+def function(x):
+    return ((x*x)-x)/x
+print (function(5))
+
+
+###
+def function(x):
+    return ((x*x)-x)/x
+y=function(10)
+print(y)
+
+
+###
+def function(x):
+    return x*x
+print(function(5) + function(7))
+
+
+###
+def function(x,y):
+    return x*x+y*y
+print(function(5,7))
+
+
+# floor division
+print(8/5)  # 1.6
+print(8.0//5) # 1.0
+
+
+# round
+print(round(3.1414926535),2)
+print(round(print(8.0/5)),4)
+
+
+# round
+print("A")
+print("B")
+
+print("Data is" + " Null")
+print("Null"*5)
