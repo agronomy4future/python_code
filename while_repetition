@@ -1,0 +1,75 @@
+## text print
+i=1
+while i<=3:
+    print("I'm a man")
+    i+=1
+# I'm a man, I'm a man, I'm a man
+
+
+## even number
+i=1
+while i<=50:
+    print(i*2)
+    i+=1   
+# 2,4,6,8...
+    
+    
+## How to find fine the lowest multiple of 26 among number more than 100
+i=100
+while i%26!=0:
+    i+=1
+print(i) 
+# 104
+---
+
+i=1
+while i<=100:
+   print(i*26)
+   i += 1      
+#26,52,78,104,130,...
+---
+
+
+## sum of all number between 1 to 10
+i = 1
+total = 0
+
+while i <= 10:
+    total += i
+    i += 1
+print(total)
+#55
+---
+
+or 1000
+i = 1
+total = 0
+
+while i <= 5000:
+    total += i
+    i += 1
+print(total)
+
+
+## Fibonacci number
+previous = 0
+current = 1
+i = 1
+
+while i <= 50:
+    print(current)
+    temp = previous  # save previous in temp
+    previous = current
+    current = current + temp
+    i += 1
+
+or
+
+previous = 0
+current = 1
+i = 1
+
+while i <= 50:
+    print(current)
+    previous, current = current, current + previous
+    i += 1
