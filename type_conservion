@@ -1,0 +1,36 @@
+print(int(3.8))  # 3
+print(float(3))  # 3.0
+
+print(int("2") + int("5"))  # 7
+print(float("1.1") + float("2.5"))  # 3.6
+
+print(str(2) + str(5))  #25
+
+
+##
+age=25
+print("My age is " + str(age) + " and I'm Young")  # My age is 25 and I'm Young
+
+
+##
+year=2022
+month=2
+day=22
+print("Today is " + str(day) + "/" + str(month) + "/" + str(year))  # Today is 22/2/2022
+print("Today is " + str(day+1) + "/" + str(month+1) + "/" + str(year+1))  # Today is 23/3/2023
+
+
+
+## Type function 
+print(type(5))       # <class 'int'>
+print(type(5.0))     # <class 'float'>
+print(type("5"))     # <class 'str'>
+
+print(type("True"))  # <class 'str'>
+print(type(True))    # <class 'bool'>
+
+def hello():
+    print("Hello!! How are you?")
+
+print(type(hello))   # <class 'function'>
+print(type(print))   # <class 'builtin_function_or_method'>
