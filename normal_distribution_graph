@@ -1,0 +1,40 @@
+# to upload package
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
+import matplotlib.pyplot as plt
+from pylab import rcParams
+import seaborn as sns
+
+# to upload data
+Url="https://raw.githubusercontent.com/agronomy4future/raw_data_practice/main/Grain%20area%20for%20two%20genotypes.csv"
+df=pd.read_csv(Url)
+
+# to divide factor
+cv1 = df.loc[df['Genotype']== 'Cultivar_A']
+cv2 = df.loc[df['Genotype']== 'Cultivar_B']
+
+# to calculate mean and standard deviation
+cv1_mean = np.mean(cv1["Area"])  
+cv1_std = np.std(cv1["Area"])  
+cv2_mean = np.mean(cv2["Area"])   
+cv2_std = np.std(cv2["Area"])     
+
+# to calculate PDF
+cv1_pdf = stats.norm.pdf(cv1["Area"].sort_values(), cv1_mean, cv1_std)
+cv2_pdf = stats.norm.pdf(cv2["Area"].sort_values(), cv2_mean, cv2_std)
+
+# to draw normal distribution graph with histogram
+plt.plot(cv1["Area"].sort_values(), cv1_pdf, color="Black", label="Cultivar_A")
+plt.plot(cv2["Area"].sort_values(), cv2_pdf, color="Orange", label="Cultivar_B")
+sns.histplot(data = cv1["Area"], color="Black",stat = "probability",alpha=0.3)
+sns.histplot(data = cv2["Area"], color="Orange", stat = "probability",alpha=0.3)                  
+plt.xlim([0,30])
+plt.ylim([0,0.15])
+plt.legend()
+plt.xlabel("Grain area (mm2)", size=15)
+plt.ylabel("Frequency", size=15)
+plt.grid(True, alpha=0.3, linestyle="--")
+plt.rcParams["figure.figsize"] = [7,5]  
+plt.rcParams["figure.dpi"] = 500 
+plt.show()
