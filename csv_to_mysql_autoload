@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""
+csv_to_mysql_autoload.py
+
+Usage:
+  python csv_to_mysql_autoload.py --csv "C:/path/file.csv" --table "UIUC.SCAPES_Soybean" --host HOST --port 25060 --user doadmin --password "xxx"
+
+Notes:
+- Requires: pandas, mysql-connector-python
+- If LOAD DATA LOCAL INFILE is disabled on server, automatically falls back to batched INSERT.
+- Adds `id BIGINT AUTO_INCREMENT PRIMARY KEY` as the first column.
+- Infers column types from CSV (INT, DOUBLE, DATETIME, VARCHAR).
+- Escapes column names with backticks; spaces and special chars converted to underscores.
+"""
+
+import argparse
+import re
+import os
+import sys
+import csv
+import warnings
+from datetime import datetime
+
+import pandas as pd
+import mysql.connector
+from mysql.connector import ClientFlag
+
+# MySQL error numbers we care about
+ER_LOCAL_INFILE_DISABLED = 3948   # "Loading local data is disabled"
+ER_NOT_ALLOWED_COMMAND   = 1148   # "The used command is not allowed..."
+
+TYPE_VARCHAR_DEFAULT = 255
+
+def sanitize_name(name: str) -> str:
+    n = re.sub(r'\s+', '_', name.strip())
+    n = re.sub(r'[^\w]', '_', n, flags=re.ASCII)
+    if re.match(r'^\d', n):
+        n = '_' + n
+    return n
+
+def infer_mysql_type(series: pd.Series) -> str:
+    s = series.dropna()
+    if s.empty:
+        return f"VARCHAR({TYPE_VARCHAR_DEFAULT})"
+    # integer?
+    try:
+        _ = pd.to_numeric(s, errors='raise')
+        if pd.api.types.is_integer_dtype(_):
+            return "BIGINT"
+    except Exception:
+        pass
+    # float?
+    try:
+        _ = pd.to_numeric(s, errors='raise')
+        if pd.api.types.is_float_dtype(_):
+            return "DOUBLE"
+    except Exception:
+        pass
+    # datetime?
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            pd.to_datetime(s, errors='raise')
+        return "DATETIME"
+    except Exception:
+        pass
+    # fallback: varchar
+    lengths = s.astype(str).map(len)
+    maxlen = int(lengths.max()) if not lengths.empty else TYPE_VARCHAR_DEFAULT
+    maxlen = max(64, min(maxlen, 1024))
+    return f"VARCHAR({maxlen})"
+
+def build_create_table(df: pd.DataFrame, table: str) -> str:
+    if '.' in table:
+        schema, name = table.split('.', 1)
+        prefix = f"`{schema}`."
+    else:
+        schema, name = None, table
+        prefix = ""
+    col_defs = ["`id` BIGINT NOT NULL AUTO_INCREMENT"]
+    seen = set()
+    for col in df.columns:
+        mysql_col = sanitize_name(col)
+        base = mysql_col
+        k = 1
+        while mysql_col in seen:
+            k += 1
+            mysql_col = f"{base}_{k}"
+        seen.add(mysql_col)
+        mysql_type = infer_mysql_type(df[col])
+        col_defs.append(f"`{mysql_col}` {mysql_type} NULL")
+    col_defs.append("PRIMARY KEY (`id`)")
+    cols_sql = ",\n  ".join(col_defs)
+    return f"CREATE TABLE IF NOT EXISTS {prefix}`{name}` (\n  {cols_sql}\n) ENGINE=InnoDB;"
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv", required=True, help="Path to CSV file")
+    ap.add_argument("--table", required=True, help="Schema.Table or Table")
+    ap.add_argument("--host", required=True)
+    ap.add_argument("--port", type=int, default=3306)
+    ap.add_argument("--user", required=True)
+    ap.add_argument("--password", required=True)
+    ap.add_argument("--delimiter", default=",")
+    ap.add_argument("--quotechar", default='"')
+    args = ap.parse_args()
+
+    # Read a sample for inference
+    df = pd.read_csv(args.csv, nrows=5000, encoding="utf-8-sig")
+    original_cols = list(df.columns)
+
+    # sanitize headers (unique)
+    sanitized_cols, seen = [], set()
+    for c in original_cols:
+        name = sanitize_name(c)
+        base = name
+        k = 1
+        while name in seen:
+            k += 1
+            name = f"{base}_{k}"
+        seen.add(name)
+        sanitized_cols.append(name)
+
+    create_sql = build_create_table(df, args.table)
+
+    # Connect (client side LOCAL INFILE enable)
+    conn = mysql.connector.connect(
+        host=args.host,
+        port=args.port,
+        user=args.user,
+        password=args.password,
+        allow_local_infile=True,
+        client_flags=[ClientFlag.LOCAL_FILES],
+    )
+    cur = conn.cursor()
+
+    # Ensure schema exists & USE it
+    if '.' in args.table:
+        schema, _ = args.table.split('.', 1)
+        cur.execute(f"CREATE DATABASE IF NOT EXISTS `{schema}`;")
+        cur.execute(f"USE `{schema}`;")
+
+    # Create table
+    cur.execute(create_sql)
+
+    # Write temp CSV with sanitized header
+    tmp_path = args.csv + ".tmp_mysql.csv"
+    with open(args.csv, "r", newline='', encoding="utf-8-sig") as fin, \
+         open(tmp_path, "w", newline='', encoding="utf-8") as fout:
+        reader = csv.reader(fin, delimiter=args.delimiter, quotechar=args.quotechar)
+        writer = csv.writer(fout, delimiter=args.delimiter, quotechar=args.quotechar)
+        rows = list(reader)
+        if not rows:
+            raise SystemExit("Empty CSV.")
+        rows[0] = sanitized_cols
+        writer.writerows(rows)
+
+    # LOAD DATA (preferred)
+    column_list = ", ".join([f"`{c}`" for c in sanitized_cols])
+    load_sql = f"""
+LOAD DATA LOCAL INFILE %s
+INTO TABLE `{args.table.split('.')[-1]}`
+FIELDS TERMINATED BY %s
+ENCLOSED BY %s
+LINES TERMINATED BY '\\n'
+IGNORE 1 LINES
+({column_list});
+"""
+
+    try:
+        cur.execute("SET SESSION sql_mode=REPLACE(@@sql_mode, 'NO_ZERO_DATE', '');")
+        cur.execute("SET SESSION sql_mode=REPLACE(@@sql_mode, 'NO_ZERO_IN_DATE', '');")
+        cur.execute(load_sql, (tmp_path, args.delimiter, args.quotechar))
+        conn.commit()
+        print("Import complete via LOAD DATA LOCAL INFILE.")
+    except mysql.connector.Error as e:
+        if getattr(e, "errno", None) in (ER_LOCAL_INFILE_DISABLED, ER_NOT_ALLOWED_COMMAND):
+            print("LOAD DATA LOCAL INFILE is disabled on the server; switching to batched INSERT mode...")
+            df_full = pd.read_csv(args.csv, encoding="utf-8-sig")
+            # align to sanitized names
+            mapping = {orig: sani for orig, sani in zip(original_cols, sanitized_cols)}
+            df_full.columns = [mapping[c] for c in df_full.columns]
+
+            placeholders = ", ".join(["%s"] * len(sanitized_cols))
+            insert_sql = f"INSERT INTO `{args.table.split('.')[-1]}` ({', '.join([f'`{c}`' for c in sanitized_cols])}) VALUES ({placeholders})"
+
+            batch = 1000
+            n = len(df_full)
+            for i in range(0, n, batch):
+                chunk = df_full.iloc[i:i+batch]
+                vals = [tuple(None if pd.isna(v) else v for v in row) for row in chunk.to_numpy()]
+                cur.executemany(insert_sql, vals)
+                conn.commit()
+                print(f"Inserted {min(i+batch, n)}/{n} rows...")
+            print("Import complete via INSERT fallback.")
+        else:
+            raise
+    finally:
+        try:
+            cur.close()
+        finally:
+            conn.close()
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+    print("\nCREATE TABLE used:\n", create_sql)
+
+if __name__ == "__main__":
+    main()
